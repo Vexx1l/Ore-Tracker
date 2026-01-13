@@ -1,6 +1,6 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Load Data from GitHub
+-- Load Data from GitHub (Ensure these links are the RAW versions)
 local OreData = loadstring(game:HttpGet("https://raw.githubusercontent.com/Vexx1l/Ore-Tracker/main/OreData.lua"))()
 
 -- Session Variables
@@ -44,15 +44,23 @@ local WebhookTab = Window:CreateTab("🔗 Webhook", 4483362458)
 WebhookTab:CreateInput({
     Name = "Discord Webhook URL",
     PlaceholderText = "Paste Webhook Here",
-    Callback = function(Text) 
-        _G.WebhookURL = Text 
-        print("Webhook Updated: " .. Text)
-    end,
+    Callback = function(Text) _G.WebhookURL = Text end,
 })
 WebhookTab:CreateInput({
     Name = "User ID (For Pings)",
     PlaceholderText = "Your Discord ID",
     Callback = function(Text) _G.DiscordID = Text end,
+})
+WebhookTab:CreateButton({
+    Name = "🚀 Send Test Notification",
+    Callback = function()
+        if _G.WebhookURL == "" then
+            Rayfield:Notify({Title = "Error", Content = "Please enter a Webhook URL!", Duration = 5})
+            return
+        end
+        -- Test Notification call
+        NotifyOre("Test Crystal", "Development Zone", true)
+    end,
 })
 
 -- Filters Tab
@@ -65,88 +73,72 @@ for Rarity, Val in pairs(_G.EnabledRarities) do
     })
 end
 
--- Improved Webhook Function
-local function NotifyOre(oreName, area)
-    if _G.WebhookURL == "" or _G.WebhookURL == "YOUR_WEBHOOK_HERE" then 
-        warn("Webhook URL is empty! Please set it in the UI.")
-        return 
-    end
+-- Webhook Logic
+function NotifyOre(oreName, area, isTest)
+    if _G.WebhookURL == "" then return end
     
-    -- Search database for ore info
     local oreInfo = nil
+    -- Search database for the ore
     for areaKey, ores in pairs(OreData) do
         if ores[oreName] then
             oreInfo = ores[oreName]
-            area = areaKey -- Auto-detect area if not provided correctly
+            area = areaKey
             break
         end
     end
 
-    if not oreInfo then
-        warn("Ore not found in database: " .. tostring(oreName))
+    -- Fallback for Test or Unknown
+    if isTest then
+        oreInfo = {Rarity = "Divine", Chance = "1/1,000,000", Color = 0x9400D3}
+        oreName = "TEST NOTIFICATION"
+    elseif not oreInfo then
         oreInfo = {Rarity = "Unknown", Chance = "1/?", Color = 0xFFFFFF}
     end
 
-    if not _G.EnabledRarities[oreInfo.Rarity] then 
-        print("Notification skipped: Rarity " .. oreInfo.Rarity .. " is disabled.")
-        return 
-    end
+    if not isTest and not _G.EnabledRarities[oreInfo.Rarity] then return end
 
     local duration = os.time() - StartTime
-    local hours = math.floor(duration / 3600)
-    local mins = math.floor((duration % 3600) / 60)
+    local h = math.floor(duration / 3600)
+    local m = math.floor((duration % 3600) / 60)
     
     local data = {
-        ["content"] = (_G.DiscordID ~= "" and _G.DiscordID ~= "YOUR_ID_HERE") and "<@" .. _G.DiscordID .. ">" or nil,
+        ["content"] = _G.DiscordID ~= "" and "<@" .. _G.DiscordID .. ">" or nil,
         ["embeds"] = {{
-            ["title"] = "💎 " .. oreInfo.Rarity .. " Ore Found!",
+            ["title"] = "💎 Rare Ore Mined!",
             ["color"] = oreInfo.Color,
             ["fields"] = {
-                {["name"] = "📍 Area", ["value"] = "**" .. (area or "Unknown") .. "**", ["inline"] = true},
+                {["name"] = "📍 Area", ["value"] = "**" .. area .. "**", ["inline"] = true},
                 {["name"] = "⛏️ Ore", ["value"] = "**" .. oreName .. "**", ["inline"] = true},
                 {["name"] = "✨ Rarity", ["value"] = oreInfo.Rarity .. " (" .. oreInfo.Chance .. ")", ["inline"] = true},
-                {["name"] = "⏱️ Session", ["value"] = string.format("%02dh %02dm", hours, mins), ["inline"] = true},
+                {["name"] = "⏱️ Session Stats", ["value"] = string.format("%02dh %02dm", h, m), ["inline"] = true},
                 {["name"] = "⚡ Efficiency", ["value"] = OresPerHour .. " Ores/Hour", ["inline"] = true},
                 {["name"] = "🟢 Status", ["value"] = "Mining...", ["inline"] = false}
             },
-            ["footer"] = {["text"] = "The Forge Tracker • v1.1"}
+            ["footer"] = {["text"] = "The Forge Tracker • by Vexx1l"}
         }}
     }
 
-    local success, err = pcall(function()
-        request({
-            Url = _G.WebhookURL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = game:GetService("HttpService"):JSONEncode(data)
-        })
-    end)
-
-    if success then print("✅ Webhook sent for: " .. oreName) else warn("❌ Webhook failed: " .. err) end
+    request({
+        Url = _G.WebhookURL,
+        Method = "POST",
+        Headers = {["Content-Type"] = "application/json"},
+        Body = game:GetService("HttpService"):JSONEncode(data)
+    })
 end
 
 -- Detection Logic
--- Note: You may need to verify the path game.ReplicatedStorage.Remotes.MineOre
-local RemotePath = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 5)
-if RemotePath then
-    local MineRemote = RemotePath:FindFirstChild("MineOre") or RemotePath:FindFirstChild("OreMined")
-    
-    if MineRemote then
-        MineRemote.OnClientEvent:Connect(function(oreName, areaName)
-            TotalMined = TotalMined + 1
-            AreaLabel:Set("Current Area: " .. (areaName or "Detecting..."))
-            NotifyOre(oreName, areaName)
-        end)
-    else
-        warn("Could not find the Mining Remote. Detection might not work!")
-    end
-end
+local Remote = game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("MineOre")
+Remote.OnClientEvent:Connect(function(oreName, areaName)
+    TotalMined = TotalMined + 1
+    AreaLabel:Set("Current Area: " .. tostring(areaName))
+    NotifyOre(oreName, areaName)
+end)
 
--- Efficiency Loop
+-- Stats Loop
 spawn(function()
     while task.wait(1) do
         local duration = os.time() - StartTime
-        OresPerHour = math.floor(TotalMined / (duration / 3600 + 0.0001))
+        OresPerHour = math.floor(TotalMined / (duration / 3600 + 0.001))
         StatLabel:Set("Session Stats: " .. string.format("%02dh %02dm", math.floor(duration/3600), math.floor((duration%3600)/60)))
         EffLabel:Set("Efficiency: " .. OresPerHour .. " Ores/Hour")
     end
