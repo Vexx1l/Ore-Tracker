@@ -1,7 +1,10 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Load your GitHub Data
-local OreData = loadstring(game:HttpGet("https://raw.githubusercontent.com/Vexx1l/Ore-Tracker/refs/heads/main/OreData.lua"))()
+-- Use these clean links now that your repo is PUBLIC
+local OreData = loadstring(game:HttpGet("https://raw.githubusercontent.com/Vexx1l/Ore-Tracker/main/OreData.lua"))()
+
+-- If you have a WebhookEngine:
+local WebhookEngine = loadstring(game:HttpGet("https://raw.githubusercontent.com/Vexx1l/Ore-Tracker/main/WebhookEngine.lua"))()
 
 -- Session Variables
 local StartTime = os.time()
