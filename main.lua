@@ -1,10 +1,7 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- Use these clean links now that your repo is PUBLIC
+-- Load Data from GitHub
 local OreData = loadstring(game:HttpGet("https://raw.githubusercontent.com/Vexx1l/Ore-Tracker/main/OreData.lua"))()
-
--- If you have a WebhookEngine:
-local WebhookEngine = loadstring(game:HttpGet("https://raw.githubusercontent.com/Vexx1l/Ore-Tracker/main/WebhookEngine.lua"))()
 
 -- Session Variables
 local StartTime = os.time()
@@ -46,12 +43,15 @@ local EffLabel = MainTab:CreateLabel("Efficiency: 0 Ores/Hour")
 local WebhookTab = Window:CreateTab("🔗 Webhook", 4483362458)
 WebhookTab:CreateInput({
     Name = "Discord Webhook URL",
-    PlaceholderText = "https://discord.com/api/webhooks/...",
-    Callback = function(Text) _G.WebhookURL = Text end,
+    PlaceholderText = "Paste Webhook Here",
+    Callback = function(Text) 
+        _G.WebhookURL = Text 
+        print("Webhook Updated: " .. Text)
+    end,
 })
 WebhookTab:CreateInput({
     Name = "User ID (For Pings)",
-    PlaceholderText = "1234567890...",
+    PlaceholderText = "Your Discord ID",
     Callback = function(Text) _G.DiscordID = Text end,
 })
 
@@ -65,75 +65,89 @@ for Rarity, Val in pairs(_G.EnabledRarities) do
     })
 end
 
--- Function to handle Webhook Sending
+-- Improved Webhook Function
 local function NotifyOre(oreName, area)
-    if _G.WebhookURL == "" then return end
+    if _G.WebhookURL == "" or _G.WebhookURL == "YOUR_WEBHOOK_HERE" then 
+        warn("Webhook URL is empty! Please set it in the UI.")
+        return 
+    end
     
-    local oreInfo
-    if OreData[area] and OreData[area][oreName] then
-        oreInfo = OreData[area][oreName]
-    else
-        -- Fallback if ore isn't in DB
+    -- Search database for ore info
+    local oreInfo = nil
+    for areaKey, ores in pairs(OreData) do
+        if ores[oreName] then
+            oreInfo = ores[oreName]
+            area = areaKey -- Auto-detect area if not provided correctly
+            break
+        end
+    end
+
+    if not oreInfo then
+        warn("Ore not found in database: " .. tostring(oreName))
         oreInfo = {Rarity = "Unknown", Chance = "1/?", Color = 0xFFFFFF}
     end
 
-    if not _G.EnabledRarities[oreInfo.Rarity] then return end
+    if not _G.EnabledRarities[oreInfo.Rarity] then 
+        print("Notification skipped: Rarity " .. oreInfo.Rarity .. " is disabled.")
+        return 
+    end
 
     local duration = os.time() - StartTime
     local hours = math.floor(duration / 3600)
     local mins = math.floor((duration % 3600) / 60)
     
     local data = {
-        ["content"] = _G.DiscordID ~= "" and "<@" .. _G.DiscordID .. ">" or nil,
+        ["content"] = (_G.DiscordID ~= "" and _G.DiscordID ~= "YOUR_ID_HERE") and "<@" .. _G.DiscordID .. ">" or nil,
         ["embeds"] = {{
-            ["title"] = "💎 Rare Ore Mined!",
+            ["title"] = "💎 " .. oreInfo.Rarity .. " Ore Found!",
             ["color"] = oreInfo.Color,
             ["fields"] = {
-                {["name"] = "📍 Area", ["value"] = "**" .. area .. "**", ["inline"] = true},
+                {["name"] = "📍 Area", ["value"] = "**" .. (area or "Unknown") .. "**", ["inline"] = true},
                 {["name"] = "⛏️ Ore", ["value"] = "**" .. oreName .. "**", ["inline"] = true},
                 {["name"] = "✨ Rarity", ["value"] = oreInfo.Rarity .. " (" .. oreInfo.Chance .. ")", ["inline"] = true},
                 {["name"] = "⏱️ Session", ["value"] = string.format("%02dh %02dm", hours, mins), ["inline"] = true},
                 {["name"] = "⚡ Efficiency", ["value"] = OresPerHour .. " Ores/Hour", ["inline"] = true},
-                {["name"] = "🟢 Status", ["value"] = "Active", ["inline"] = false}
+                {["name"] = "🟢 Status", ["value"] = "Mining...", ["inline"] = false}
             },
-            ["footer"] = {["text"] = "The Forge Tracker • Powered by Vexx1l"}
+            ["footer"] = {["text"] = "The Forge Tracker • v1.1"}
         }}
     }
 
-    request({
-        Url = _G.WebhookURL,
-        Method = "POST",
-        Headers = {["Content-Type"] = "application/json"},
-        Body = game:GetService("HttpService"):JSONEncode(data)
-    })
+    local success, err = pcall(function()
+        request({
+            Url = _G.WebhookURL,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = game:GetService("HttpService"):JSONEncode(data)
+        })
+    end)
+
+    if success then print("✅ Webhook sent for: " .. oreName) else warn("❌ Webhook failed: " .. err) end
 end
 
--- Core Tracking Logic
+-- Detection Logic
+-- Note: You may need to verify the path game.ReplicatedStorage.Remotes.MineOre
+local RemotePath = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 5)
+if RemotePath then
+    local MineRemote = RemotePath:FindFirstChild("MineOre") or RemotePath:FindFirstChild("OreMined")
+    
+    if MineRemote then
+        MineRemote.OnClientEvent:Connect(function(oreName, areaName)
+            TotalMined = TotalMined + 1
+            AreaLabel:Set("Current Area: " .. (areaName or "Detecting..."))
+            NotifyOre(oreName, areaName)
+        end)
+    else
+        warn("Could not find the Mining Remote. Detection might not work!")
+    end
+end
+
+-- Efficiency Loop
 spawn(function()
     while task.wait(1) do
         local duration = os.time() - StartTime
-        local hours = duration / 3600
-        local h = math.floor(duration / 3600)
-        local m = math.floor((duration % 3600) / 60)
-        
-        OresPerHour = math.floor(TotalMined / math.max(hours, 0.01))
-        
-        StatLabel:Set("Session Stats: " .. string.format("%02dh %02dm", h, m))
+        OresPerHour = math.floor(TotalMined / (duration / 3600 + 0.0001))
+        StatLabel:Set("Session Stats: " .. string.format("%02dh %02dm", math.floor(duration/3600), math.floor((duration%3600)/60)))
         EffLabel:Set("Efficiency: " .. OresPerHour .. " Ores/Hour")
     end
 end)
-
--- Detect Ore Mining (Adjust Remote Name based on game)
-local Remote = game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("MineOre") -- Example name
-Remote.OnClientEvent:Connect(function(oreName, areaName)
-    TotalMined = TotalMined + 1
-    AreaLabel:Set("Current Area: " .. areaName)
-    NotifyOre(oreName, areaName)
-end)
-
-Rayfield:Notify({
-    Title = "Tracker Active",
-    Content = "The Forge Ore Tracker is now running.",
-    Duration = 5,
-    Image = 4483362458,
-})
